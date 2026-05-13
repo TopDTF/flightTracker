@@ -12,16 +12,18 @@ app.use(express.static('.', { extensions: ['html'] }));
 // Helper: call AviationStack (HTTP — free plan limitation)
 function aviationFetch(params) {
   return new Promise((resolve, reject) => {
-    const qs = new URLSearchParams({ access_key: API_KEY, ...params }).toString();
+    const qs  = new URLSearchParams({ access_key: API_KEY, ...params }).toString();
     const url = `http://api.aviationstack.com/v1/flights?${qs}`;
-    http.get(url, res => {
+    const req = http.get(url, res => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try { resolve(JSON.parse(data)); }
         catch (e) { reject(e); }
       });
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => { req.destroy(); reject(new Error('timeout')); });
   });
 }
 

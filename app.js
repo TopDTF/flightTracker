@@ -249,7 +249,7 @@ function renderFlightCard(flight, dateStr) {
 }
 
 function showSection(...ids) {
-  ["loadingSection", "resultSection", "errorSection", "popularSection"]
+  ["loadingSection", "resultSection", "errorSection"]
     .forEach(id => {
       document.getElementById(id).style.display = ids.includes(id) ? "" : "none";
     });
@@ -276,24 +276,9 @@ function setSourceBadge(source) {
 }
 
 function initChips() {
-  const chips = ["TG101", "TG206", "SQ972", "EK373", "FD3012", "PG201", "SL201"];
-  const container = document.getElementById("flightChips");
-  chips.forEach(code => {
-    const chip = document.createElement("button");
-    chip.className = "chip";
-    chip.textContent = code;
-    chip.onclick = () => {
-      document.getElementById("flightNumber").value = code;
-      if (!document.getElementById("travelDate").value) {
-        document.getElementById("travelDate").value = new Date().toISOString().split("T")[0];
-      }
-      document.getElementById("searchForm").dispatchEvent(new Event("submit"));
-    };
-    container.appendChild(chip);
-  });
-
   const exTags = document.getElementById("exampleTags");
-  chips.slice(0, 5).forEach(code => {
+  if (!exTags) return;
+  ["TG101", "SQ972", "EK373", "QR835", "TG409"].forEach(code => {
     const tag = document.createElement("button");
     tag.className = "chip";
     tag.textContent = code;
@@ -354,4 +339,3 @@ document.getElementById("searchForm").addEventListener("submit", async function 
 document.getElementById("travelDate").value = new Date().toISOString().split("T")[0];
 
 initChips();
-showSection("popularSection");
