@@ -355,8 +355,13 @@ function showSections(...ids) {
     });
 }
 
-async function fetchCompareAPI(dep, arr) {
-  const res = await fetch(`/api/compare?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}`);
+async function fetchCompareAPI(dep, arr, date) {
+  const today    = new Date().toISOString().split('T')[0];
+  const isFuture = date && date > today;
+  const url      = isFuture
+    ? `/api/schedule?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}&date=${encodeURIComponent(date)}`
+    : `/api/compare?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -376,6 +381,8 @@ function displayResults(results, origin, dest, source) {
 
   const srcBadge = source === "cached"
     ? `<span class="source-badge cached">⚡ Cached</span>`
+    : source === "schedule"
+    ? `<span class="source-badge schedule">📅 Schedule data</span>`
     : `<span class="source-badge live">🟢 Live data</span>`;
 
   const priceInfo = rendered.bestPrice?.price != null
@@ -409,11 +416,20 @@ async function doSearch() {
   let results = [];
   let source  = "live";
 
+  const date = document.getElementById("dateFrom").value;
   try {
-    const data = await fetchCompareAPI(origin, dest);
+    const data = await fetchCompareAPI(origin, dest, date);
+    if (data.error === 'amadeus_not_configured') {
+      btn.classList.remove("loading");
+      btn.querySelector(".btn-text").textContent = "Compare Flights";
+      document.getElementById("noResultSection").querySelector("p").textContent =
+        "Future schedule lookup requires Amadeus API key. Please configure AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET.";
+      showSections("noResultSection");
+      return;
+    }
     if (data.found && data.flights?.length > 0) {
       results = data.flights;
-      source  = data.cached ? "cached" : "live";
+      source  = data.cached ? "cached" : (data.source === "amadeus" ? "schedule" : "live");
     }
   } catch (e) {
     console.error('API error:', e);

@@ -1,10 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const http    = require('http');
+const https   = require('https');
 
 const app     = express();
 const PORT    = process.env.PORT || 3000;
-const API_KEY = process.env.AVIATIONSTACK_KEY || '';
+const API_KEY           = process.env.AVIATIONSTACK_KEY   || '';
+const AMADEUS_CLIENT_ID = process.env.AMADEUS_CLIENT_ID   || '';
+const AMADEUS_SECRET    = process.env.AMADEUS_CLIENT_SECRET || '';
 
 // ── In-memory cache ──────────────────────────────────────────────────────────
 const cache = new Map(); // key → { data, expiresAt }
@@ -93,6 +96,99 @@ function normalize(f) {
   };
 }
 
+// ── Amadeus OAuth token (auto-refresh) ───────────────────────────────────────
+let amadeusToken = null;
+
+async function getAmadeusToken() {
+  if (amadeusToken && Date.now() < amadeusToken.expiresAt) return amadeusToken.value;
+
+  const body = new URLSearchParams({
+    grant_type:    'client_credentials',
+    client_id:     AMADEUS_CLIENT_ID,
+    client_secret: AMADEUS_SECRET,
+  }).toString();
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'test.api.amadeus.com',
+      path:     '/v1/security/oauth2/token',
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        const json = JSON.parse(data);
+        amadeusToken = { value: json.access_token, expiresAt: Date.now() + (json.expires_in - 60) * 1000 };
+        resolve(amadeusToken.value);
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => { req.destroy(); reject(new Error('token timeout')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function amadeusFetch(path, token) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'test.api.amadeus.com',
+      path,
+      method:  'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+    });
+    req.on('error', reject);
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.end();
+  });
+}
+
+function normalizeAmadeus(f, dep, arr, date) {
+  const seg   = f.flightOffers?.[0]?.itineraries?.[0]?.segments?.[0] || {};
+  const segDep = seg.departure || {};
+  const segArr = seg.arrival   || {};
+
+  // Flight Schedule API response shape
+  const flIata     = f.iataCode ? `${f.iataCode}${f.number}` : seg.carrierCode + seg.number;
+  const departure  = segDep.at ? segDep.at.slice(11,16) : '--:--';
+  const arrival    = segArr.at ? segArr.at.slice(11,16) : '--:--';
+  const dMins      = seg.duration
+    ? (() => { const m = seg.duration.match(/PT(\d+H)?(\d+M)?/); return (parseInt(m?.[1]||0)*60)+(parseInt(m?.[2]||0)); })()
+    : 0;
+  const duration   = dMins > 0 ? `${Math.floor(dMins/60)}h ${dMins%60}m` : '--';
+
+  return {
+    flightNumber: flIata,
+    airline:      seg.carrierCode || 'N/A',
+    originCode:   segDep.iataCode || dep,
+    originCity:   segDep.iataCode || dep,
+    destCode:     segArr.iataCode || arr,
+    destCity:     segArr.iataCode || arr,
+    departure, arrival, duration, durationMins: dMins,
+    terminal:    segDep.terminal || '-',
+    gate:        '-',
+    arrTerminal: segArr.terminal || '-',
+    aircraft:    seg.aircraft?.code || 'N/A',
+    status:      'scheduled',
+    delay:       0, stops: 0, price: null,
+  };
+}
+
+// ── Amadeus: Flight Schedule by route + date ──────────────────────────────────
+async function fetchSchedule(dep, arr, date) {
+  if (!AMADEUS_CLIENT_ID || !AMADEUS_SECRET) throw new Error('Amadeus not configured');
+  const token = await getAmadeusToken();
+  const qs    = new URLSearchParams({ originLocationCode: dep, destinationLocationCode: arr, departureDate: date, max: 10 });
+  const data  = await amadeusFetch(`/v2/schedule/flights?${qs}`, token);
+  if (data.errors) throw new Error(data.errors[0]?.detail || 'Amadeus error');
+  return (data.data || []);
+}
+
 // ── Preload popular routes on startup ────────────────────────────────────────
 const POPULAR_ROUTES = [
   ['BKK','SIN'], ['BKK','NRT'], ['BKK','HKT'],
@@ -176,7 +272,7 @@ app.get('/api/flight', async (req, res) => {
   }
 });
 
-// ── GET /api/compare?dep=BKK&arr=SIN ─────────────────────────────────────────
+// ── GET /api/compare?dep=BKK&arr=SIN ─── real-time (today) ───────────────────
 app.get('/api/compare', async (req, res) => {
   const dep = (req.query.dep || '').toUpperCase().trim();
   const arr = (req.query.arr || '').toUpperCase().trim();
@@ -198,6 +294,66 @@ app.get('/api/compare', async (req, res) => {
     res.status(504).json({ error: e.message });
   }
 });
+
+// ── GET /api/schedule?dep=BKK&arr=SIN&date=2026-06-29 ─── future schedules ──
+app.get('/api/schedule', async (req, res) => {
+  const dep  = (req.query.dep  || '').toUpperCase().trim();
+  const arr  = (req.query.arr  || '').toUpperCase().trim();
+  const date = (req.query.date || '').trim();
+  if (!dep || !arr || !date) return res.status(400).json({ error: 'Missing dep/arr/date' });
+
+  if (!AMADEUS_CLIENT_ID) {
+    return res.status(503).json({ error: 'amadeus_not_configured', message: 'Amadeus API key not set up yet.' });
+  }
+
+  const key    = `schedule:${dep}:${arr}:${date}`;
+  const cached = cacheGet(key);
+  if (cached) return res.json({ found: cached.length > 0, flights: cached, cached: true, source: 'amadeus' });
+
+  try {
+    const raw     = await fetchSchedule(dep, arr, date);
+    const flights = raw.map(f => normalizeSchedule(f, dep, arr, date)).filter(f => f.flightNumber !== 'N/A');
+    cacheSet(key, flights, ROUTE_TTL);
+    res.json({ found: flights.length > 0, flights, cached: false, source: 'amadeus' });
+  } catch (e) {
+    res.status(504).json({ error: e.message });
+  }
+});
+
+function normalizeSchedule(f, dep, arr, date) {
+  const points = f.flightPoints || [];
+  const depPt  = points.find(p => p.iataCode === dep) || points[0] || {};
+  const arrPt  = points.find(p => p.iataCode === arr) || points[points.length - 1] || {};
+  const seg    = (f.segments || [])[0] || {};
+
+  const departure = depPt.departure?.timings?.[0]?.value?.slice(11,16) || '--:--';
+  const arrival   = arrPt.arrival?.timings?.[0]?.value?.slice(11,16)   || '--:--';
+
+  let durationMins = 0;
+  if (seg.duration) {
+    const m = seg.duration.match(/PT(\d+H)?(\d+M)?/);
+    durationMins = (parseInt(m?.[1] || 0) * 60) + parseInt(m?.[2] || 0);
+  }
+  const duration = durationMins > 0 ? `${Math.floor(durationMins/60)}h ${durationMins%60}m` : '--';
+  const carrier  = (f.legs || [{}])[0]?.boardPointIataCode === dep ? (seg.carrierCode || '') : (seg.carrierCode || '');
+  const flightNum = seg.carrierCode && seg.number ? `${seg.carrierCode}${seg.number}` : 'N/A';
+
+  return {
+    flightNumber: flightNum,
+    airline:      seg.carrierCode || 'N/A',
+    originCode:   dep,
+    originCity:   dep,
+    destCode:     arr,
+    destCity:     arr,
+    departure, arrival, duration, durationMins,
+    terminal:    depPt.departure?.terminal?.code || '-',
+    gate:        '-',
+    arrTerminal: arrPt.arrival?.terminal?.code   || '-',
+    aircraft:    (f.legs || [{}])[0]?.aircraftEquipment?.aircraftType || 'N/A',
+    status:      'scheduled',
+    delay: 0, stops: (points.length > 2) ? points.length - 2 : 0, price: null,
+  };
+}
 
 // ── GET /api/cache-status (debug) ─────────────────────────────────────────────
 app.get('/api/cache-status', (req, res) => {
