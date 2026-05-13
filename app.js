@@ -269,9 +269,9 @@ async function searchFlightAPI(number) {
 function setSourceBadge(source) {
   const footer = document.querySelector("#resultCard .card-footer");
   if (!footer) return;
-  const badge = source === "live"
-    ? `<span class="source-badge live">🟢 Live data</span>`
-    : `<span class="source-badge mock">⚪ Demo data</span>`;
+  const badge = source === "cached"
+    ? `<span class="source-badge cached">⚡ Cached</span>`
+    : `<span class="source-badge live">🟢 Live data</span>`;
   footer.insertAdjacentHTML("afterbegin", badge);
 }
 
@@ -306,20 +306,16 @@ document.getElementById("searchForm").addEventListener("submit", async function 
   showSection("loadingSection");
 
   let flight = null;
-  let source = "mock";
+  let source = "live";
 
   try {
     const result = await searchFlightAPI(number);
     if (result.found && result.flight) {
       flight = result.flight;
-      source = "live";
+      source = result.cached ? "cached" : "live";
     }
   } catch (_) {
-    // API unavailable — fall through to mock
-  }
-
-  if (!flight) {
-    flight = searchMock(number);
+    // API unavailable
   }
 
   btn.classList.remove("loading");

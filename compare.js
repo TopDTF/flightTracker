@@ -374,9 +374,9 @@ function displayResults(results, origin, dest, source) {
   const rendered = renderResults(sorted, origin, dest);
   if (!rendered) { showSections("noResultSection"); return; }
 
-  const srcBadge = source === "live"
-    ? `<span class="source-badge live">🟢 Live data</span>`
-    : `<span class="source-badge mock">⚪ Demo data</span>`;
+  const srcBadge = source === "cached"
+    ? `<span class="source-badge cached">⚡ Cached</span>`
+    : `<span class="source-badge live">🟢 Live data</span>`;
 
   const priceInfo = rendered.bestPrice?.price != null
     ? `<span class="summary-sep">|</span><span>Best price: <strong>฿${formatTHB(rendered.bestPrice.price)}</strong> (${rendered.bestPrice.airline})</span>`
@@ -406,21 +406,17 @@ async function doSearch() {
   btn.querySelector(".btn-text").textContent = "Searching...";
   showSections("loadingSection");
 
-  let results = null;
-  let source  = "mock";
+  let results = [];
+  let source  = "live";
 
   try {
     const data = await fetchCompareAPI(origin, dest);
     if (data.found && data.flights?.length > 0) {
       results = data.flights;
-      source  = "live";
+      source  = data.cached ? "cached" : "live";
     }
-  } catch (_) {
-    // API unavailable — fall through to mock
-  }
-
-  if (!results) {
-    results = compareFlights.filter(f => f.originCode === origin && f.destCode === dest);
+  } catch (e) {
+    console.error('API error:', e);
   }
 
   btn.classList.remove("loading");
