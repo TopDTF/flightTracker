@@ -131,22 +131,43 @@ setInterval(preloadAll, ROUTE_TTL);
 // ── Static files ─────────────────────────────────────────────────────────────
 app.use(express.static('.', { extensions: ['html'] }));
 
-// ── GET /api/flight?iata=TG101 ────────────────────────────────────────────────
+// ── GET /api/flight?iata=TG101&date=2026-05-13 ───────────────────────────────
 app.get('/api/flight', async (req, res) => {
-  const iata = (req.query.iata || '').toUpperCase().trim();
+  const iata = (req.query.iata  || '').toUpperCase().trim();
+  const date = (req.query.date  || '').trim();
   if (!iata) return res.status(400).json({ error: 'Missing iata' });
   if (!API_KEY) return res.status(503).json({ error: 'API key not configured' });
 
-  const key    = `flight:${iata}`;
+  // Free plan: only today's real-time data available
+  const today    = new Date().toISOString().split('T')[0];
+  const isFuture = date && date > today;
+  if (isFuture) {
+    return res.json({
+      found: false,
+      reason: 'future',
+      message: `Schedule data for ${date} requires a paid plan. Real-time tracking is available for today's flights only.`,
+    });
+  }
+
+  const params = { flight_iata: iata, limit: 1 };
+  if (date) params.flight_date = date;
+
+  const key    = `flight:${iata}:${date || today}`;
   const cached = cacheGet(key);
   if (cached) return res.json({ found: true, flight: cached, cached: true });
 
   try {
-    const data = await aviationFetch({ flight_iata: iata, limit: 1 });
+    const data = await aviationFetch(params);
     if (data.error) return res.status(502).json({ error: data.error.info || 'API error' });
 
     const flights = (data.data || []).map(normalize);
-    if (!flights.length) return res.json({ found: false });
+    if (!flights.length) {
+      return res.json({
+        found: false,
+        reason: 'not_found',
+        message: `Flight ${iata} was not found. It may not be operating today or is not in our data source.`,
+      });
+    }
 
     cacheSet(key, flights[0], FLIGHT_TTL);
     res.json({ found: true, flight: flights[0], cached: false });

@@ -260,8 +260,10 @@ function searchMock(number) {
   return flights.find(f => f.flightNumber === normalized) || null;
 }
 
-async function searchFlightAPI(number) {
-  const res = await fetch(`/api/flight?iata=${encodeURIComponent(number)}`);
+async function searchFlightAPI(number, date) {
+  const params = new URLSearchParams({ iata: number });
+  if (date) params.set('date', date);
+  const res = await fetch(`/api/flight?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -308,14 +310,20 @@ document.getElementById("searchForm").addEventListener("submit", async function 
   let flight = null;
   let source = "live";
 
+  let errorMsg = `Flight "${number.toUpperCase()}" not found. Please check the flight number and try again.`;
+
   try {
-    const result = await searchFlightAPI(number);
+    const result = await searchFlightAPI(number, dateStr);
     if (result.found && result.flight) {
       flight = result.flight;
       source = result.cached ? "cached" : "live";
+    } else if (result.reason === "future") {
+      errorMsg = `📅 Future schedule not available on free plan.\n\nReal-time tracking works for today's active flights only. Flight ${number.toUpperCase()} on ${formatDate(dateStr)} cannot be looked up in advance.`;
+    } else if (result.message) {
+      errorMsg = result.message;
     }
   } catch (_) {
-    // API unavailable
+    errorMsg = "Unable to reach flight data service. Please try again.";
   }
 
   btn.classList.remove("loading");
@@ -326,8 +334,7 @@ document.getElementById("searchForm").addEventListener("submit", async function 
     setSourceBadge(source);
     showSection("resultSection");
   } else {
-    document.getElementById("errorMessage").textContent =
-      `No flight found for "${number.toUpperCase()}". Please check the flight number and try again.`;
+    document.getElementById("errorMessage").textContent = errorMsg;
     showSection("errorSection");
   }
 });
