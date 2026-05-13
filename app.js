@@ -255,9 +255,24 @@ function showSection(...ids) {
     });
 }
 
-function searchFlight(number, dateStr) {
+function searchMock(number) {
   const normalized = number.trim().toUpperCase();
   return flights.find(f => f.flightNumber === normalized) || null;
+}
+
+async function searchFlightAPI(number) {
+  const res = await fetch(`/api/flight?iata=${encodeURIComponent(number)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function setSourceBadge(source) {
+  const footer = document.querySelector("#resultCard .card-footer");
+  if (!footer) return;
+  const badge = source === "live"
+    ? `<span class="source-badge live">🟢 Live data</span>`
+    : `<span class="source-badge mock">⚪ Demo data</span>`;
+  footer.insertAdjacentHTML("afterbegin", badge);
 }
 
 function initChips() {
@@ -270,8 +285,7 @@ function initChips() {
     chip.onclick = () => {
       document.getElementById("flightNumber").value = code;
       if (!document.getElementById("travelDate").value) {
-        const today = new Date().toISOString().split("T")[0];
-        document.getElementById("travelDate").value = today;
+        document.getElementById("travelDate").value = new Date().toISOString().split("T")[0];
       }
       document.getElementById("searchForm").dispatchEvent(new Event("submit"));
     };
@@ -286,8 +300,7 @@ function initChips() {
     tag.onclick = () => {
       document.getElementById("flightNumber").value = code;
       if (!document.getElementById("travelDate").value) {
-        const today = new Date().toISOString().split("T")[0];
-        document.getElementById("travelDate").value = today;
+        document.getElementById("travelDate").value = new Date().toISOString().split("T")[0];
       }
       document.getElementById("searchForm").dispatchEvent(new Event("submit"));
     };
@@ -295,35 +308,47 @@ function initChips() {
   });
 }
 
-document.getElementById("searchForm").addEventListener("submit", function (e) {
+document.getElementById("searchForm").addEventListener("submit", async function (e) {
   e.preventDefault();
   const number = document.getElementById("flightNumber").value.trim();
   const dateStr = document.getElementById("travelDate").value;
 
-  if (!number) {
-    document.getElementById("flightNumber").focus();
-    return;
-  }
+  if (!number) { document.getElementById("flightNumber").focus(); return; }
 
   const btn = document.getElementById("searchBtn");
   btn.classList.add("loading");
   btn.querySelector(".btn-text").textContent = "Searching...";
   showSection("loadingSection");
 
-  setTimeout(() => {
-    btn.classList.remove("loading");
-    btn.querySelector(".btn-text").textContent = "Track Flight";
+  let flight = null;
+  let source = "mock";
 
-    const flight = searchFlight(number, dateStr);
-    if (flight) {
-      document.getElementById("resultCard").innerHTML = renderFlightCard(flight, dateStr);
-      showSection("resultSection");
-    } else {
-      document.getElementById("errorMessage").textContent =
-        `No flight found for "${number.toUpperCase()}". Please check the flight number and try again.`;
-      showSection("errorSection");
+  try {
+    const result = await searchFlightAPI(number);
+    if (result.found && result.flight) {
+      flight = result.flight;
+      source = "live";
     }
-  }, 800);
+  } catch (_) {
+    // API unavailable — fall through to mock
+  }
+
+  if (!flight) {
+    flight = searchMock(number);
+  }
+
+  btn.classList.remove("loading");
+  btn.querySelector(".btn-text").textContent = "Track Flight";
+
+  if (flight) {
+    document.getElementById("resultCard").innerHTML = renderFlightCard(flight, dateStr);
+    setSourceBadge(source);
+    showSection("resultSection");
+  } else {
+    document.getElementById("errorMessage").textContent =
+      `No flight found for "${number.toUpperCase()}". Please check the flight number and try again.`;
+    showSection("errorSection");
+  }
 });
 
 document.getElementById("travelDate").value = new Date().toISOString().split("T")[0];

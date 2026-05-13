@@ -355,10 +355,50 @@ function showSections(...ids) {
     });
 }
 
-function doSearch() {
+async function fetchCompareAPI(dep, arr) {
+  const res = await fetch(`/api/compare?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function displayResults(results, origin, dest, source) {
+  if (results.length === 0) { showSections("noResultSection"); return; }
+
+  currentResults = results;
+  currentSort = "departure";
+  document.querySelectorAll(".sort-tab").forEach(t =>
+    t.classList.toggle("active", t.dataset.sort === "departure")
+  );
+
+  const sorted   = sortResults(results, "departure");
+  const rendered = renderResults(sorted, origin, dest);
+  if (!rendered) { showSections("noResultSection"); return; }
+
+  const srcBadge = source === "live"
+    ? `<span class="source-badge live">🟢 Live data</span>`
+    : `<span class="source-badge mock">⚪ Demo data</span>`;
+
+  const priceInfo = rendered.bestPrice?.price != null
+    ? `<span class="summary-sep">|</span><span>Best price: <strong>฿${formatTHB(rendered.bestPrice.price)}</strong> (${rendered.bestPrice.airline})</span>`
+    : "";
+
+  document.getElementById("summaryBar").innerHTML = `
+    <span>✈ <strong>${origin} → ${dest}</strong></span>
+    <span class="summary-sep">|</span>
+    <span><strong>${rendered.count}</strong> flights found</span>
+    ${priceInfo}
+    <span class="summary-sep">|</span>
+    <span>Fastest: <strong>${rendered.fastest.duration}</strong> (${rendered.fastest.airline})</span>
+    ${srcBadge}
+  `;
+
+  document.getElementById("flightsGrid").innerHTML = rendered.html;
+  showSections("summaryBar", "controlBar", "resultsSection");
+}
+
+async function doSearch() {
   const origin = document.getElementById("origin").value;
   const dest   = document.getElementById("destination").value;
-
   if (!origin || !dest) return;
 
   const btn = document.getElementById("compareBtn");
@@ -366,45 +406,27 @@ function doSearch() {
   btn.querySelector(".btn-text").textContent = "Searching...";
   showSections("loadingSection");
 
-  setTimeout(() => {
-    btn.classList.remove("loading");
-    btn.querySelector(".btn-text").textContent = "Compare Flights";
+  let results = null;
+  let source  = "mock";
 
-    let results = compareFlights.filter(
-      f => f.originCode === origin && f.destCode === dest
-    );
-
-    if (results.length === 0) {
-      showSections("noResultSection");
-      return;
+  try {
+    const data = await fetchCompareAPI(origin, dest);
+    if (data.found && data.flights?.length > 0) {
+      results = data.flights;
+      source  = "live";
     }
+  } catch (_) {
+    // API unavailable — fall through to mock
+  }
 
-    currentResults = results;
-    currentSort = "departure";
-    document.querySelectorAll(".sort-tab").forEach(t =>
-      t.classList.toggle("active", t.dataset.sort === "departure")
-    );
+  if (!results) {
+    results = compareFlights.filter(f => f.originCode === origin && f.destCode === dest);
+  }
 
-    const sorted = sortResults(results, "departure");
-    const rendered = renderResults(sorted, origin, dest);
-    if (!rendered) { showSections("noResultSection"); return; }
+  btn.classList.remove("loading");
+  btn.querySelector(".btn-text").textContent = "Compare Flights";
 
-    const fromCity = airports.find(a => a.code === origin)?.city || origin;
-    const toCity   = airports.find(a => a.code === dest)?.city   || dest;
-
-    document.getElementById("summaryBar").innerHTML = `
-      <span>✈ <strong>${origin} → ${dest}</strong></span>
-      <span class="summary-sep">|</span>
-      <span><strong>${rendered.count}</strong> flights found</span>
-      <span class="summary-sep">|</span>
-      <span>Best price: <strong>฿${formatTHB(rendered.bestPrice.price)}</strong> (${rendered.bestPrice.airline})</span>
-      <span class="summary-sep">|</span>
-      <span>Fastest: <strong>${rendered.fastest.duration}</strong> (${rendered.fastest.airline})</span>
-    `;
-
-    document.getElementById("flightsGrid").innerHTML = rendered.html;
-    showSections("summaryBar", "controlBar", "resultsSection");
-  }, 700);
+  displayResults(results, origin, dest, source);
 }
 
 // Sort tabs
