@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Compare Flights — Flight Tracker</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="compare.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header" style="padding-bottom:12px;">
+      <div class="header-content">
+        <span class="header-icon" style="width:54px;height:54px;font-size:1.5rem;line-height:54px;margin-bottom:12px;">✈</span>
+        <h1>Flight Compare</h1>
+        <p class="header-subtitle">Find and compare flights between destinations</p>
+      </div>
+    </header>
+
+    <!-- Nav -->
+    <nav class="page-nav">
+      <a href="index.html" class="nav-item">
+        <span class="nav-icon">🔍</span> Track Flight
+      </a>
+      <a href="compare.html" class="nav-item active">
+        <span class="nav-icon">⚖</span> Compare Flights
+      </a>
+    </nav>
+
+    <main class="main">
+      <!-- Search form -->
+      <section class="search-section compare-form-section">
+        <form id="compareForm">
+          <div class="compare-form-grid">
+            <!-- Origin -->
+            <div class="form-group route-group">
+              <label for="origin">From</label>
+              <div class="select-wrapper">
+                <select id="origin" class="styled-select">
+                  <option value="">Select origin</option>
+                </select>
+                <span class="select-arrow">▾</span>
+              </div>
+            </div>
+
+            <!-- Swap button -->
+            <button type="button" class="swap-btn" id="swapBtn" title="Swap">⇄</button>
+
+            <!-- Destination -->
+            <div class="form-group route-group">
+              <label for="destination">To</label>
+              <div class="select-wrapper">
+                <select id="destination" class="styled-select">
+                  <option value="">Select destination</option>
+                </select>
+                <span class="select-arrow">▾</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="date-row">
+            <div class="form-group">
+              <label for="dateFrom">Departure From</label>
+              <input type="date" id="dateFrom" />
+            </div>
+            <div class="form-group">
+              <label for="dateTo">Departure To</label>
+              <input type="date" id="dateTo" />
+            </div>
+          </div>
+
+          <button type="submit" class="btn-search" id="compareBtn">
+            <span class="btn-icon">⚖</span>
+            <span class="btn-text">Compare Flights</span>
+          </button>
+        </form>
+      </section>
+
+      <!-- Loading -->
+      <section id="loadingSection" style="display:none;" class="result-section">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Searching available flights...</p>
+        </div>
+      </section>
+
+      <!-- Summary bar -->
+      <div class="summary-bar" id="summaryBar" style="display:none;"></div>
+
+      <!-- Sort / filter bar -->
+      <div class="control-bar" id="controlBar" style="display:none;">
+        <span class="control-label">Sort by:</span>
+        <div class="sort-tabs" id="sortTabs">
+          <button class="sort-tab active" data-sort="departure">Departure</button>
+          <button class="sort-tab" data-sort="duration">Duration</button>
+          <button class="sort-tab" data-sort="price">Price</button>
+          <button class="sort-tab" data-sort="airline">Airline</button>
+        </div>
+      </div>
+
+      <!-- Results grid -->
+      <section id="resultsSection" style="display:none;">
+        <div class="flights-grid" id="flightsGrid"></div>
+      </section>
+
+      <!-- No results -->
+      <section id="noResultSection" style="display:none;">
+        <div class="error-card">
+          <div class="error-icon">✕</div>
+          <h3>No Flights Found</h3>
+          <p>There are no flights matching your search. Try different origin/destination or date range.</p>
+        </div>
+      </section>
+
+      <!-- Route suggestions -->
+      <section class="popular-flights" id="suggestSection">
+        <h2 class="section-title">Popular Routes</h2>
+        <div class="route-chips" id="routeChips"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js?v=2"></script>
+  <script src="compare.js"></script>
+</body>
+</html>

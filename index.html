@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flight Tracker</title>
+  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="compare.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-content">
+        <span class="header-icon">✈</span>
+        <h1>Flight Tracker</h1>
+        <p class="header-subtitle">Track your flight status in real-time</p>
+      </div>
+    </header>
+
+    <!-- Nav -->
+    <nav class="page-nav">
+      <a href="index.html" class="nav-item active">
+        <span class="nav-icon">🔍</span> Track Flight
+      </a>
+      <a href="compare.html" class="nav-item">
+        <span class="nav-icon">⚖</span> Compare Flights
+      </a>
+    </nav>
+
+    <main class="main">
+      <section class="search-section">
+        <form class="search-form" id="searchForm">
+          <div class="form-group">
+            <label for="flightNumber">Flight Number</label>
+            <input
+              type="text"
+              id="flightNumber"
+              placeholder="e.g. TG101, SQ972, EK373"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="form-group">
+            <label for="travelDate">Travel Date</label>
+            <input
+              type="date"
+              id="travelDate"
+            />
+          </div>
+          <button type="submit" class="btn-search" id="searchBtn">
+            <span class="btn-icon">✈</span>
+            <span class="btn-text">Track Flight</span>
+          </button>
+        </form>
+      </section>
+
+      <section class="result-section" id="loadingSection" style="display:none;">
+        <div class="loading">
+          <div class="spinner"></div>
+          <p>Searching for flight...</p>
+        </div>
+      </section>
+
+      <section class="result-section" id="resultSection" style="display:none;">
+        <div class="result-card" id="resultCard"></div>
+      </section>
+
+      <section class="result-section" id="errorSection" style="display:none;">
+        <div class="error-card">
+          <div class="error-icon">✕</div>
+          <h3>Flight Not Found</h3>
+          <p id="errorMessage">We couldn't find any flight matching your search. Please check the flight number and try again.</p>
+          <div class="example-flights">
+            <p>Try one of these flights:</p>
+            <div class="example-tags" id="exampleTags"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="popular-flights" id="popularSection">
+        <h2 class="section-title">Popular Flights</h2>
+        <div class="flight-chips" id="flightChips"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
