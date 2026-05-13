@@ -7,7 +7,7 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.AVIATIONSTACK_KEY || '';
 
-app.use(express.static('.'));
+app.use(express.static('.', { extensions: ['html'] }));
 
 // Helper: call AviationStack (HTTP — free plan limitation)
 function aviationFetch(params) {
