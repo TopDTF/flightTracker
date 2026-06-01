@@ -171,6 +171,9 @@ async function fetchCompareViaAdb(dep, arr, date, fromLocal, toLocal) {
 
   const enriched = [];
   for (let i = 0; i < filtered.length; i++) {
+    // Sleep 1.1s before every enrichment call (including the first — the FIDS
+    // call above already used the current 1-req/sec slot).
+    await new Promise(r => setTimeout(r, 1100));
     const d   = filtered[i];
     const num = (d.number || '').replace(/\s+/g, '');
     let row = null;
@@ -178,13 +181,20 @@ async function fetchCompareViaAdb(dep, arr, date, fromLocal, toLocal) {
       try {
         const details = await adbFlightByNumber(num, date);
         if (details.length > 0) row = normalizeAdbFlight(details[0]);
-      } catch (e) { /* fall through */ }
+      } catch (e) {
+        console.log(`[adb enrich] ${num} ${date} failed: ${e.message}`);
+      }
     }
     enriched.push(row || normalizeAdbFids(d, dep));
-    if (i < filtered.length - 1) await new Promise(r => setTimeout(r, 1100));
   }
 
+  // Don't cache for a full 24h if enrichment failed for any row — retry sooner.
   return enriched.filter(f => f.flightNumber !== 'N/A');
+}
+
+function compareCacheTtl(flights) {
+  const anyMissing = flights.some(f => f.arrival === '--:--');
+  return anyMissing ? 10 * 60 * 1000 : ROUTE_TTL; // 10min vs 24h
 }
 
 // ── AviationStack (fallback) ─────────────────────────────────────────────────
@@ -334,7 +344,7 @@ app.get('/api/compare', async (req, res) => {
       const later  = new Date(now.getTime() + 12 * 3600000);
       const flights = await fetchCompareViaAdb(dep, arr, today, isoLocal(now), isoLocal(later));
       if (flights.length) {
-        cacheSet(key, flights, ROUTE_TTL);
+        cacheSet(key, flights, compareCacheTtl(flights));
         return res.json({ found: true, flights, cached: false, source: 'aerodatabox' });
       }
     } catch (e) {
@@ -380,7 +390,7 @@ app.get('/api/schedule', async (req, res) => {
   try {
     // Morning window (00:00–12:00 local) — 12h is the FIDS limit
     const flights = await fetchCompareViaAdb(dep, arr, date, `${date}T00:00`, `${date}T12:00`);
-    cacheSet(key, flights, ROUTE_TTL);
+    cacheSet(key, flights, compareCacheTtl(flights));
     res.json({ found: flights.length > 0, flights, cached: false, source: 'aerodatabox' });
   } catch (e) {
     res.status(504).json({ error: e.message });
