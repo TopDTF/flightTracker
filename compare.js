@@ -355,15 +355,40 @@ function showSections(...ids) {
     });
 }
 
-async function fetchCompareAPI(dep, arr, date) {
-  const today    = new Date().toISOString().split('T')[0];
-  const isFuture = date && date > today;
-  const url      = isFuture
-    ? `/api/schedule?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}&date=${encodeURIComponent(date)}`
-    : `/api/compare?dep=${encodeURIComponent(dep)}&arr=${encodeURIComponent(arr)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+function sourceBadge(source) {
+  if (source === "cached")   return `<span class="source-badge cached">⚡ Cached</span>`;
+  if (source === "schedule") return `<span class="source-badge schedule">📅 Schedule data</span>`;
+  return `<span class="source-badge live">🟢 Live data</span>`;
+}
+
+function decorateFastest(origin, dest, source) {
+  const active = currentResults.filter(f => f.status !== "cancelled" && f.durationMins > 0);
+  const fastest = active.length
+    ? active.reduce((m, f) => f.durationMins < m.durationMins ? f : m)
+    : null;
+
+  if (fastest) {
+    const cards = document.querySelectorAll('#flightsGrid .compare-card');
+    currentResults.forEach((f, i) => {
+      if (f.flightNumber === fastest.flightNumber && cards[i]) {
+        cards[i].classList.add('fastest');
+        const ribbonEl = cards[i].querySelector('.ribbon-space, .card-ribbon');
+        if (ribbonEl) ribbonEl.outerHTML = `<div class="card-ribbon ribbon-fast">⚡ Fastest</div>`;
+      }
+    });
+  }
+
+  const fastestInfo = fastest
+    ? `<span class="summary-sep">|</span><span>Fastest: <strong>${fastest.duration}</strong> (${fastest.airline})</span>`
+    : '';
+
+  document.getElementById("summaryBar").innerHTML = `
+    <span>✈ <strong>${origin} → ${dest}</strong></span>
+    <span class="summary-sep">|</span>
+    <span><strong>${currentResults.length}</strong> flights found</span>
+    ${fastestInfo}
+    ${sourceBadge(source)}
+  `;
 }
 
 function displayResults(results, origin, dest, source) {
@@ -403,42 +428,102 @@ function displayResults(results, origin, dest, source) {
   showSections("summaryBar", "controlBar", "resultsSection");
 }
 
-async function doSearch() {
+let currentEventSource = null;
+
+function doSearch() {
   const origin = document.getElementById("origin").value;
   const dest   = document.getElementById("destination").value;
   if (!origin || !dest) return;
+
+  if (currentEventSource) currentEventSource.close();
 
   const btn = document.getElementById("compareBtn");
   btn.classList.add("loading");
   btn.querySelector(".btn-text").textContent = "Searching...";
   showSections("loadingSection");
 
-  let results = [];
-  let source  = "live";
-
+  currentResults = [];
   const date = document.getElementById("dateFrom").value;
-  try {
-    const data = await fetchCompareAPI(origin, dest, date);
-    if (data.error === 'aerodatabox_not_configured') {
+  const params = new URLSearchParams({ dep: origin, arr: dest });
+  if (date) params.set('date', date);
+  const url = `/api/compare-stream?${params}`;
+
+  const grid = document.getElementById("flightsGrid");
+  grid.innerHTML = '';
+
+  let source = "live";
+  let total  = 0;
+  let finished = false;
+
+  const stop = () => {
+    if (!finished) {
+      finished = true;
+      if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
       btn.classList.remove("loading");
       btn.querySelector(".btn-text").textContent = "Compare Flights";
-      document.getElementById("noResultSection").querySelector("p").textContent =
-        "Future schedule lookup requires AeroDataBox API key. Please configure AERODATABOX_KEY.";
+    }
+  };
+
+  const es = new EventSource(url);
+  currentEventSource = es;
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isFuture = date && date > todayStr;
+
+  es.addEventListener('meta', e => {
+    const data = JSON.parse(e.data);
+    total  = data.total;
+    source = data.cached ? "cached" : (isFuture ? "schedule" : "live");
+    if (total === 0) return; // wait for done → noResult
+    showSections("summaryBar", "controlBar", "resultsSection");
+    document.getElementById("summaryBar").innerHTML = `
+      <span>✈ <strong>${origin} → ${dest}</strong></span>
+      <span class="summary-sep">|</span>
+      <span>Loading <strong>${total}</strong> flights…</span>
+      ${sourceBadge(source)}
+    `;
+  });
+
+  es.addEventListener('flight', e => {
+    const flight = JSON.parse(e.data);
+    const idx = currentResults.length;
+    currentResults.push(flight);
+    grid.insertAdjacentHTML('beforeend', renderCard(flight, idx, null, null));
+    document.getElementById("summaryBar").querySelector('span:nth-child(3)').innerHTML =
+      `Loading <strong>${currentResults.length}/${total}</strong>…`;
+  });
+
+  es.addEventListener('done', () => {
+    if (currentResults.length === 0) {
+      stop();
       showSections("noResultSection");
       return;
     }
-    if (data.found && data.flights?.length > 0) {
-      results = data.flights;
-      source  = data.cached ? "cached" : (data.source === "amadeus" ? "schedule" : "live");
+    decorateFastest(origin, dest, source);
+    currentSort = "departure";
+    document.querySelectorAll(".sort-tab").forEach(t =>
+      t.classList.toggle("active", t.dataset.sort === "departure")
+    );
+    stop();
+  });
+
+  es.addEventListener('error', e => {
+    // EventSource error event has no useful data; check our custom error
+    let isConfigError = false;
+    try {
+      if (e.data) {
+        const data = JSON.parse(e.data);
+        if (data.code === 'aerodatabox_not_configured') isConfigError = true;
+      }
+    } catch (_) {}
+
+    stop();
+    if (isConfigError) {
+      document.getElementById("noResultSection").querySelector("p").textContent =
+        "Future schedule lookup requires AeroDataBox API key. Please configure AERODATABOX_KEY.";
     }
-  } catch (e) {
-    console.error('API error:', e);
-  }
-
-  btn.classList.remove("loading");
-  btn.querySelector(".btn-text").textContent = "Compare Flights";
-
-  displayResults(results, origin, dest, source);
+    if (currentResults.length === 0) showSections("noResultSection");
+  });
 }
 
 // Sort tabs

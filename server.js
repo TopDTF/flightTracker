@@ -397,6 +397,85 @@ app.get('/api/schedule', async (req, res) => {
   }
 });
 
+// ── GET /api/compare-stream?dep=BKK&arr=NRT&date=YYYY-MM-DD ──────────────────
+// SSE stream: emits one `flight` event per enriched row so the client can
+// render incrementally instead of waiting ~5s for the whole batch.
+app.get('/api/compare-stream', async (req, res) => {
+  const dep  = (req.query.dep  || '').toUpperCase().trim();
+  const arr  = (req.query.arr  || '').toUpperCase().trim();
+  const date = (req.query.date || '').trim();
+  if (!dep || !arr) { res.status(400).json({ error: 'Missing dep/arr' }); return; }
+
+  res.setHeader('Content-Type',  'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection',    'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx-style buffering
+  res.flushHeaders();
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const today   = todayIso();
+  const useDate = date || today;
+  const key     = `route:${dep}:${arr}:${useDate}`;
+
+  // Cache hit → stream all at once
+  const cached = cacheGet(key);
+  if (cached) {
+    send('meta', { total: cached.length, cached: true, source: 'aerodatabox' });
+    cached.forEach(f => send('flight', f));
+    send('done', { count: cached.length });
+    res.end();
+    return;
+  }
+
+  if (!AERODATABOX_KEY) {
+    send('error', { message: 'AeroDataBox not configured', code: 'aerodatabox_not_configured' });
+    res.end();
+    return;
+  }
+
+  try {
+    const isFuture  = useDate > today;
+    const fromLocal = isFuture ? `${useDate}T00:00` : isoLocal(new Date());
+    const toLocal   = isFuture ? `${useDate}T12:00` : isoLocal(new Date(Date.now() + 12 * 3600000));
+
+    const deps     = await adbDepartures(dep, fromLocal, toLocal);
+    const filtered = deps.filter(d => d.movement?.airport?.iata === arr).slice(0, 4);
+
+    send('meta', { total: filtered.length, cached: false, source: 'aerodatabox' });
+
+    const collected = [];
+    for (let i = 0; i < filtered.length; i++) {
+      await new Promise(r => setTimeout(r, 1100));
+      const d   = filtered[i];
+      const num = (d.number || '').replace(/\s+/g, '');
+      let row = null;
+      if (num) {
+        try {
+          const details = await adbFlightByNumber(num, useDate);
+          if (details.length > 0) row = normalizeAdbFlight(details[0]);
+        } catch (e) {
+          console.log(`[stream enrich] ${num} ${useDate} failed: ${e.message}`);
+        }
+      }
+      const flight = row || normalizeAdbFids(d, dep);
+      if (flight.flightNumber !== 'N/A') {
+        collected.push(flight);
+        send('flight', flight);
+      }
+    }
+
+    if (collected.length > 0) cacheSet(key, collected, compareCacheTtl(collected));
+    send('done', { count: collected.length });
+  } catch (e) {
+    send('error', { message: e.message });
+  }
+  res.end();
+});
+
 // ── GET /api/cache-status (debug) ────────────────────────────────────────────
 app.get('/api/cache-status', (req, res) => {
   const entries = [...cache.entries()].map(([k, v]) => ({
