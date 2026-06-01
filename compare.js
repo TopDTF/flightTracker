@@ -419,11 +419,11 @@ async function doSearch() {
   const date = document.getElementById("dateFrom").value;
   try {
     const data = await fetchCompareAPI(origin, dest, date);
-    if (data.error === 'amadeus_not_configured') {
+    if (data.error === 'aerodatabox_not_configured') {
       btn.classList.remove("loading");
       btn.querySelector(".btn-text").textContent = "Compare Flights";
       document.getElementById("noResultSection").querySelector("p").textContent =
-        "Future schedule lookup requires Amadeus API key. Please configure AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET.";
+        "Future schedule lookup requires AeroDataBox API key. Please configure AERODATABOX_KEY.";
       showSections("noResultSection");
       return;
     }
