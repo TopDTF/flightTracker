@@ -162,22 +162,27 @@ async function adbDepartures(dep, fromLocal, toLocal) {
   return body && Array.isArray(body.departures) ? body.departures : [];
 }
 
-// Find ≤4 flights dep→arr in window, enrich each with arrival time via Flight-by-number
+// Find ≤4 flights dep→arr in window, enrich each with arrival time via Flight-by-number.
+// AeroDataBox free tier = 1 req/sec, so we serialize the enrichment calls with a delay.
 async function fetchCompareViaAdb(dep, arr, date, fromLocal, toLocal) {
   const deps     = await adbDepartures(dep, fromLocal, toLocal);
   const filtered = deps.filter(d => d.movement?.airport?.iata === arr).slice(0, 4);
   if (!filtered.length) return [];
 
-  const enriched = await Promise.all(filtered.map(async d => {
+  const enriched = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const d   = filtered[i];
     const num = (d.number || '').replace(/\s+/g, '');
+    let row = null;
     if (num) {
       try {
         const details = await adbFlightByNumber(num, date);
-        if (details.length > 0) return normalizeAdbFlight(details[0]);
+        if (details.length > 0) row = normalizeAdbFlight(details[0]);
       } catch (e) { /* fall through */ }
     }
-    return normalizeAdbFids(d, dep);
-  }));
+    enriched.push(row || normalizeAdbFids(d, dep));
+    if (i < filtered.length - 1) await new Promise(r => setTimeout(r, 1100));
+  }
 
   return enriched.filter(f => f.flightNumber !== 'N/A');
 }
@@ -390,6 +395,13 @@ app.get('/api/cache-status', (req, res) => {
     expiresIn: Math.round((v.expiresAt - Date.now()) / 60000) + ' min',
   }));
   res.json({ size: cache.size, entries });
+});
+
+// ── POST /api/cache-clear ────────────────────────────────────────────────────
+app.post('/api/cache-clear', (req, res) => {
+  const n = cache.size;
+  cache.clear();
+  res.json({ cleared: n });
 });
 
 app.listen(PORT, () => {
